@@ -1,0 +1,1 @@
+add diskvm 0 /sys/kernel/scst_tgt/targets/iscsi/iqn.2021-02.cloud.wisper:for.all/luns/mgmt
