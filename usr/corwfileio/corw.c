@@ -97,7 +97,6 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
 void corw_handler_destroy(struct corw_handler *corwh) {
     bitmap_close_file(corwh->bitmap, corwh->bitmaplen);
     // close(corwh->corw_fd);
-	TRACE_DBG("msync corw_handler");
 	int ret = msync(corwh->buf, corwh->file_size, MS_SYNC);
 	if (ret < 0)
 		PRINT_ERROR("msync corw_handler failed ret = %d", ret);
