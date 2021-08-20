@@ -19,6 +19,7 @@ struct corw_handler
 	const char *file_name;
 	int file_size;
 	int corw_fd;
+	char *buf;
 	int block_size;
 	unsigned long *bitmap;
 	size_t bitmaplen;
