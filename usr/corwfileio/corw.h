@@ -14,18 +14,21 @@
 struct corw_handler
 {
     // fuse file name
-	const char *file;
+	const char *fuse_fn;
     // corw file name
-	const char *file_name;
+	const char *corw_fn;
 	int file_size;
-	int corw_fd;
 	char *buf;
 	int block_size;
+	int nblocks;
+    // bitmap file name
+	char *bitmap_fn;
 	unsigned long *bitmap;
 	size_t bitmaplen;
 };
 
 struct corw_handler *corw_handler_create(char *corwfile, char *fil, int64_t file_size, int block_size);
 void corw_handler_destroy(struct corw_handler *corwh);
+void corw_handler_preload(struct corw_handler *h, int fuse_fd);
 loff_t corw_handler_read(struct corw_handler *h, int fuse_fd, void *buf, loff_t loff, size_t nbyte);
 loff_t corw_handler_write(struct corw_handler *h, int fuse_fd, const void *buf, loff_t loff, size_t nbyte);

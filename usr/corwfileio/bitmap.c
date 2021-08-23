@@ -6,26 +6,22 @@
 #define BITS_TO_LONGS(nr)       DIV_ROUND_UP(nr, BITS_PER_BYTE * sizeof(long))
 #define BITS_PER_LONG		(sizeof(unsigned long) * BITS_PER_BYTE)
 
-unsigned char* new_bitmap(unsigned long size);
-int bitmap_get(unsigned char* bitmap, unsigned long i);
-void bitmap_set(unsigned char* bitmap, unsigned long i);
-unsigned char* bitmap_to_bytes(unsigned char* bitmap);
-
 size_t bitmap_size(unsigned long nbits)
 {
 	unsigned long narrays = BITS_TO_LONGS(nbits);
 	return sizeof(unsigned long) * narrays;
 }
 
-unsigned long *bitmap_alloc(unsigned long nbits)
-{
-	unsigned long *bitmap_array;
-	unsigned long narrays = BITS_TO_LONGS(nbits);
+// unsigned long *bitmap_alloc(unsigned long nbits)
+// {
+// 	unsigned long *bitmap_array;
+// 	unsigned long narrays = BITS_TO_LONGS(nbits);
 
-    bitmap_array = (unsigned long*) malloc(narrays * sizeof(unsigned long));
+//     bitmap_array = (unsigned long*) malloc(narrays * sizeof(unsigned long));
 
-	return bitmap_array;
-}
+// 	return bitmap_array;
+// }
+
 void bitmap_sync_file(unsigned long *bitmap, size_t bitmaplen)
 {
 	TRACE_DBG("msync bitmap %p", bitmap);
@@ -165,7 +161,7 @@ unsigned long *bitmap_open_file(const char *bitmapfile, unsigned long nbits, siz
 
 		/* now we get the bitmap file of the required file size */
 
-		buf = mmap(NULL, buflen, mmap_flag, MAP_SHARED, fd, 0);
+		buf = mmap(NULL, buflen, mmap_flag, MAP_SHARED | MAP_POPULATE | MAP_LOCKED, fd, 0);
 		if (buf == MAP_FAILED)
 			PRINT_ERROR("bitmap mapping failed fd %d", fd);
 
@@ -237,28 +233,3 @@ unsigned long bitmap_popcount(unsigned long *bm, unsigned long nbits)
 
 	return cached;
 }
-
-// unsigned char* new_bitmap(unsigned long size) {
-//     int bytesize = size / 8;
-//     if (size % 8 != 0) {
-//         bytesize++;
-//     }
-//     unsigned char* bitmap = (unsigned char*) malloc(bytesize * sizeof(char));
-//     memset(bitmap, 0, bytesize);
-//     return bitmap;
-// }
-
-// int bitmap_get(unsigned char* bitmap, unsigned long i) {
-//     int byteindex = i / 8;
-//     int bitindex = i % 8;
-//     char oct = bitmap[byteindex];
-//     char result = oct & (1 << bitindex);
-//     return result;
-// }
-
-// void bitmap_set(unsigned char* bitmap, unsigned long i) {
-//     int byteindex = i / 8;
-//     int bitindex = i % 8;
-//     char oct = bitmap[byteindex];
-//     bitmap[byteindex] = oct | (1 << bitindex);
-// }

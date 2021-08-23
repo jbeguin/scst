@@ -1,27 +1,22 @@
 #include "corw.h"
 
-void load_block(struct corw_handler *h, int corw_fd, int fuse_fd, int i) {
-    // PRINT_INFO("load_block %d from fuse_fd %d to corw_fd %d", i, fuse_fd, corw_fd);
+void load_block(struct corw_handler *h, int fuse_fd, int i) {
+    PRINT_INFO("load_block %d", i);
     loff_t loff = ((long) i) * ((long) h->block_size);
-	// PRINT_INFO("load_block off %"PRId64", len %d", loff, h->block_size);
-    /* SEEK corw_fd */
-    // lseek64(corw_fd, loff, 0/*SEEK_SET*/);
-    /* COPY */
-    // ssize_t err = sendfile(corw_fd, fuse_fd, &loff, h->block_size);
-    // if (err < 0) {
-    //     PRINT_ERROR("load_block sendfile trouble %"PRId64" < 0 %"PRId64
-    //         " (errno %d) %s", (uint64_t)err, (uint64_t)loff,
-    //         errno, strerror(errno));
-    // }
+    char *buf = malloc(h->block_size);
 
     /* READ */
-    char *buf = malloc(h->block_size);
     lseek64(fuse_fd, loff, 0/*SEEK_SET*/);
     int res = read(fuse_fd, buf, h->block_size);
-	// PRINT_INFO("load_block read res %d", res);
+    if (res < 0) {
+		PRINT_ERROR("load_block(%d) returned %"PRId64" (errno %d)",
+			i, (uint64_t)res, errno);
+        return;
+    }
+
     /* COPY to mmap */
-    memcpy(&(h->buf)[loff], buf, h->block_size);
-	// PRINT_INFO("load_block memcpy ok %d", 0);
+    memcpy(&(h->buf)[loff], buf, res);
+
     free(buf);
 }
 
@@ -30,6 +25,7 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
     PRINT_INFO("File size %"PRId64"", file_size);
 
     int fd = open(corwfile, O_WRONLY | O_APPEND | O_CREAT, 0644);
+
     if (fd < 0) {
         PRINT_ERROR("Unable to open file %s (%s)", corwfile,
             strerror(errno));
@@ -51,9 +47,8 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
         close(fd);
         return NULL;
     }
-
-
     close(fd);
+
     fd = open(corwfile, O_RDWR | O_LARGEFILE);
 
     if (fd < 0) {
@@ -62,12 +57,11 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
         return NULL;
     }
 
-	struct stat st;
-	int stat = fstat(fd, &st);
-
+    struct stat st;
+    fstat(fd, &st);
     char *buf = mmap(NULL, st.st_size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
     if (buf == MAP_FAILED)
-        PRINT_ERROR("bitmap mapping failed fd %d", fd);
+        PRINT_ERROR("corwfile mapping failed fd %d", fd);
 
     close(fd);
 
@@ -75,62 +69,70 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
     struct corw_handler *corwh = (struct corw_handler*) malloc(sizeof(struct corw_handler));
     char *bitmapfn = malloc(strlen(corwfile) + 7);
     strcpy(bitmapfn, corwfile);
-    strcat(bitmapfn, ".state");
-    corwh->file = file;
-    corwh->file_name = corwfile;
+    strcat(bitmapfn, ".bitmap");
+    corwh->fuse_fn = file;
+    corwh->corw_fn = corwfile;
     corwh->file_size = file_size;
     corwh->block_size = block_size;
-    // corwh->corw_fd = fd;
     corwh->buf = buf;
-    int nblocks = (file_size + 1) / block_size;
-    // if (file_size % block_size != 0) nblocks++;
+    corwh->nblocks = file_size / block_size;
+    if (file_size % block_size == 0) corwh->nblocks++;
     size_t bitmaplen = 0;
-    corwh->bitmap = bitmap_open_file(bitmapfn, nblocks, &bitmaplen, 0, 0);
+    corwh->bitmap = bitmap_open_file(bitmapfn, corwh->nblocks, &bitmaplen, 0, 0);
+    corwh->bitmap_fn = bitmapfn;
     corwh->bitmaplen = bitmaplen;
-	TRACE_DBG("corw_handler_create corwh->bitmaplen %d", corwh->bitmaplen);
-
-    free(bitmapfn);
+	PRINT_INFO("corw_handler_create corwh->bitmaplen %d", (int) corwh->bitmaplen);
     
     return corwh;
 }
 
 void corw_handler_destroy(struct corw_handler *corwh) {
     bitmap_close_file(corwh->bitmap, corwh->bitmaplen);
-    // close(corwh->corw_fd);
 	int ret = msync(corwh->buf, corwh->file_size, MS_SYNC);
 	if (ret < 0)
 		PRINT_ERROR("msync corw_handler failed ret = %d", ret);
     ret = munmap(corwh->buf, corwh->file_size);
 	if (ret < 0)
 		PRINT_ERROR("munmap corw_handler ret = %d", ret);
+    free(corwh->bitmap_fn);
+    free(corwh);
 }
 
-ssize_t corw_handler_load_range(struct corw_handler *h, int corw_fd, int fuse_fd, loff_t loff, int length) {
+void corw_handler_preload(struct corw_handler *h, int fuse_fd) {
+	PRINT_INFO("corw_handler_preload nblocks %d", h->nblocks);
+    for (int i = 0; i < h->nblocks; i++) {
+        if (bitmap_test(h->bitmap, i)) {
+            load_block(h, fuse_fd, i);
+        }
+    }
+}
+
+ssize_t corw_handler_load_range(struct corw_handler *h, int fuse_fd, loff_t loff, int length) {
     int start_block = loff / h->block_size;
     int end_block = (loff + length) / h->block_size;
     TRACE_DBG("corw_handler_load_range start_block %d end_block %d", start_block, end_block);
     for (int i = start_block; i <= end_block; i++) {
         TRACE_DBG("corw_handler_load_range i %d bitmap_test(h->bitmap, i) %d", i, bitmap_test(h->bitmap, i));
         if (!bitmap_test(h->bitmap, i)) {
-            load_block(h, corw_fd, fuse_fd, i);
+            load_block(h, fuse_fd, i);
             bitmap_on(h->bitmap, i);
         }
     }
     return 0;
 }
 
-ssize_t corw_handler_load_write_range(struct corw_handler *h, int corw_fd, int fuse_fd, loff_t loff, int length) {
+ssize_t corw_handler_load_write_range(struct corw_handler *h, int fuse_fd, loff_t loff, int length) {
     int start_block = loff / h->block_size;
     int end_block = (loff + length) / h->block_size;
     TRACE_DBG("corw_handler_load_write_range start_block %d end_block %d", start_block, end_block);
     if (!bitmap_test(h->bitmap, start_block)) {
-        load_block(h, corw_fd, fuse_fd, start_block);
+        load_block(h, fuse_fd, start_block);
         bitmap_on(h->bitmap, start_block);
     }
     if (start_block != end_block) {
         TRACE_DBG("corw_handler_load_write_range end_block %d bitmap_test(h->bitmap, end_block) %d", end_block, bitmap_test(h->bitmap, end_block));
         if (!bitmap_test(h->bitmap, end_block)) {
-            load_block(h, corw_fd, fuse_fd, end_block);
+            load_block(h, fuse_fd, end_block);
             bitmap_on(h->bitmap, end_block);
         }
     }
@@ -138,59 +140,17 @@ ssize_t corw_handler_load_write_range(struct corw_handler *h, int corw_fd, int f
 }
 
 loff_t corw_handler_read(struct corw_handler *h, int fuse_fd, void *buf, loff_t loff, size_t nbyte) {
-    // int corw_fd = open(h->file_name, O_RDWR | O_LARGEFILE);
-
-    // PRINT_INFO("h->corw_fd %d", h->corw_fd);
-    // PRINT_INFO("corw_handler_read %"PRId64, loff);
-    corw_handler_load_range(h, h->corw_fd, fuse_fd, loff, nbyte);
-
-    // /* SEEK */
-    // loff_t err = lseek64(h->corw_fd, loff, 0/*SEEK_SET*/);
-    // if (err != loff) {
-    //     PRINT_ERROR("lseek trouble %"PRId64" != %"PRId64
-    //         " (errno %d)", (uint64_t)err, (uint64_t)loff,
-    //         errno);
-    // }
-    // /* READ */
-    // err = read(h->corw_fd, buf, nbyte);
-
-	// if ((err < 0) || (err < nbyte)) {
-	// 	PRINT_ERROR("read() returned %"PRId64" from %d (errno %d)",
-	// 		(uint64_t)err, (uint64_t)nbyte, errno);
-	// }
-
-    // close(corw_fd);
+    corw_handler_load_range(h, fuse_fd, loff, nbyte);
 
     memcpy(buf, &(h->buf)[loff], nbyte);
-	// PRINT_INFO("corw_handler_read memcpy ok %d", 0);
 
     return nbyte;
 }
 
 loff_t corw_handler_write(struct corw_handler *h, int fuse_fd, const void *buf, loff_t loff, size_t nbyte) {
-    // int corw_fd = open(h->file_name, O_WRONLY | O_LARGEFILE);
-
-    corw_handler_load_write_range(h, h->corw_fd, fuse_fd, loff, nbyte);
-
-    // /* SEEK */
-    // loff_t err = lseek64(h->corw_fd, loff, 0/*SEEK_SET*/);
-    // if (err != loff) {
-    //     PRINT_ERROR("lseek trouble %"PRId64" != %"PRId64
-    //         " (errno %d)", (uint64_t)err, (uint64_t)loff,
-    //         errno);
-    // }
-    // /* WRITE */
-    // err = write(h->corw_fd, buf, nbyte);
-
-	// if ((err < 0) || (err < nbyte)) {
-	// 	PRINT_ERROR("write() returned %"PRId64" from %d (errno %d)",
-	// 		(uint64_t)err, (uint64_t)nbyte, errno);
-	// }
-
-    // close(corw_fd);
+    corw_handler_load_write_range(h, fuse_fd, loff, nbyte);
 
     memcpy(&(h->buf)[loff], buf, nbyte);
-	// PRINT_INFO("corw_handler_write memcpy ok %d", 0);
 
     return nbyte;
 }

@@ -92,10 +92,8 @@ static int threads = THREADS;
 static int unreg_before_close;
 static int block_size = (1 << DEF_BLOCK_SHIFT);
 static char *corw_filename = "";
-static int corw_block_size = 131072; // le mieux sur ma machine
-// static int corw_block_size = 4096; // marche pô !? zarb, ca marche maintenant. perfs moins bonnes ? a checker.
-// static int corw_block_size = 524288; // trop nul au premier load
-// static int corw_block_size = 65536; // mouaif...
+static int corw_block_size = 131072;
+static int corw_preload;
 static int block_shift = DEF_BLOCK_SHIFT;
 static int wt_flag, rd_only_flag, o_direct_flag, nullio, nv_cache;
 #if defined(DEBUG_TM_IGNORE) || defined(DEBUG_TM_IGNORE_ALL)
@@ -110,6 +108,9 @@ static void *(*alloc_fn)(size_t size) = align_alloc;
 static struct option const long_options[] =
 {
 	{"block", required_argument, 0, 'b'},
+	{"corw_file", required_argument, 0, 'C'},
+	{"corw_block_size", required_argument, 0, 'B'},
+	{"corw_preload", no_argument, 0, 'L'},
 	{"threads", required_argument, 0, 'e'},
 	{"write_through", no_argument, 0, 't'},
 	{"read_only", no_argument, 0, 'r'},
@@ -275,24 +276,16 @@ out:
 
 static void sigusr2_handler(int signo)
 {
-	int res, i;
-
 	TRACE_ENTRY();
 
-	TRACE_MGMT_DBG("%s", "Sync corw bitmap...");
+	TRACE_MGMT_DBG("Sync corw bitmap... num_devs = %d", num_devs);
 
-	for (i = 0; i < num_devs; i++) {
+	for (int i = 0; i < num_devs; i++) {
 		bitmap_sync_file(devs[i].corwh->bitmap, devs[i].corwh->bitmaplen);
-		if (res != 0) {
-			res = errno;
-			PRINT_ERROR("Sync corw bitmap failed: %s", strerror(res));
-			goto out;
-		}
 	}
 
-	TRACE_DBG("%s", "Sync corw bitmap done.");
+	TRACE_MGMT_DBG("%s", "Sync corw bitmap done.");
 
-out:
 	TRACE_EXIT();
 	return;
 }
@@ -390,7 +383,16 @@ static int start(int argc, char **argv)
 
 		close(fd);
 
+		PRINT_INFO("corw_handler_create %s", " ");
 		devs[i].corwh = corw_handler_create(corw_filename, devs[i].file_name, devs[i].file_size, corw_block_size);
+		PRINT_INFO("corw_handler_create %s", "OK");
+		if (corw_preload) {
+			fd = open(devs[i].file_name, O_RDONLY|O_LARGEFILE);
+			PRINT_INFO("corw_handler_preload %s", "");
+			corw_handler_preload(devs[i].corwh, fd);
+			PRINT_INFO("corw_handler_preload %s", "OK");
+			close(fd);
+		}
 
 		PRINT_INFO("%s", " ");
 		PRINT_INFO("Virtual device \"%s\", path \"%s\", size %"PRId64"MB, "
@@ -559,7 +561,7 @@ int main(int argc, char **argv)
 
 	memset(devs, 0, sizeof(devs));
 
-	while ((ch = getopt_long(argc, argv, "+b:C:B:e:trongluF:I:cp:f:m:d:vsS:P:hDR:Z:M:",
+	while ((ch = getopt_long(argc, argv, "+b:C:B:e:LtrongluF:I:cp:f:m:d:vsS:P:hDR:Z:M:",
 			long_options, &longindex)) >= 0) {
 		switch (ch) {
 		case 'b':
@@ -587,6 +589,9 @@ int main(int argc, char **argv)
 			break;
 		case 't':
 			wt_flag = 1;
+			break;
+		case 'L':
+			corw_preload = 1;
 			break;
 #if defined(DEBUG) || defined(TRACING)
 		case 'd':

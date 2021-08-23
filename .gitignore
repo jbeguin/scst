@@ -74,3 +74,4 @@ srpt/conftest/*/result-*.txt
 TAGS
 usr/fileio/fileio_tgt
 usr/stpgd/stpgd
+usr/corwfileio/toto*
