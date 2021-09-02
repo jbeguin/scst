@@ -148,6 +148,7 @@ static void usage(void)
 	printf("\nFILEIO disk target emulator for SCST\n");
 	printf("  -C, --corw_file	Corw filename\n");
 	printf("  -B, --corw_block_size	Bitmap block size\n");
+	printf("    , --corw_preload	preload bloacks from bitmap\n");
 	printf("  -b, --block=size	Block size, must be power of 2 and >=512\n");
 	printf("  -e, --threads=count	Number of threads, %d by default\n", THREADS);
 	printf("  -t, --write_through	Write through mode\n");
@@ -234,6 +235,7 @@ static void sigalrm_handler(int signo)
 			PRINT_ERROR("Unable to flush cache: %s", strerror(res));
 			goto out;
 		}
+		corw_handler_destroy(devs[i].corwh);
 	}
 
 	TRACE_DBG("%s", "Flushing cache done.");

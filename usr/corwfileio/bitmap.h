@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <inttypes.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -19,4 +20,4 @@ void bitmap_close_file(unsigned long *bitmap, size_t bitmaplen);
 
 int bitmap_test(unsigned long *bitmap, unsigned long block_index);
 void bitmap_on(unsigned long *bitmap, unsigned long block_index);
-unsigned long bitmap_popcount(unsigned long *bitmap, unsigned long bits);
+int bitmap_popcount(unsigned long *bitmap, unsigned long bits);

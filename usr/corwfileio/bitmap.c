@@ -223,13 +223,21 @@ void bitmap_on(unsigned long *bitmap_array, unsigned long block_index)
 }
 
 /* we can make it faster. use __builtin_popcountl()? */
-unsigned long bitmap_popcount(unsigned long *bm, unsigned long nbits)
+int bitmap_popcount(unsigned long *bm, unsigned long nbits)
 {
-	unsigned long cached = 0;
+	int cached = 0;
 	for (unsigned long index = 0; index < nbits; index++) {
 		if (bitmap_test(bm, index))
 			cached += 1;
 	}
 
+	// unsigned long nl = (nbits + sizeof(unsigned long) -1) / sizeof(unsigned long);
+	// PRINT_INFO("nl %"PRId64, nl);
+	// for (unsigned long li = 0; li < nl; li++) {
+	// 	PRINT_INFO("cached %d", cached);
+	// 	cached += __builtin_popcountl(bm[li]);
+	// }
+
 	return cached;
+
 }

@@ -12,7 +12,7 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
         return NULL;
     }
 
-    int size = lseek64(fd, 0, SEEK_END);
+    unsigned long size = lseek64(fd, 0, SEEK_END);
 
     if (size == 0) {
         int err = ftruncate64(fd, file_size);
@@ -23,7 +23,7 @@ struct corw_handler *corw_handler_create(char *corwfile, char *file, int64_t fil
             return NULL;
         }
     } else if (size != file_size) {
-        PRINT_ERROR("sizes don't match size %d, file_size %"PRId64"", size, file_size);
+        PRINT_ERROR("sizes don't match size  %"PRId64", file_size %"PRId64"", size, file_size);
         close(fd);
         return NULL;
     }
@@ -82,7 +82,7 @@ void corw_handler_destroy(struct corw_handler *corwh) {
 }
 
 ssize_t load_block(struct corw_handler *h, int fuse_fd, int i) {
-    PRINT_INFO("load_block %d", i);
+    // PRINT_INFO("load_block %d", i);
     loff_t loff = ((long) i) * ((long) h->block_size);
     char *buf = malloc(h->block_size);
 
@@ -104,17 +104,43 @@ ssize_t load_block(struct corw_handler *h, int fuse_fd, int i) {
 }
 
 void corw_handler_preload(struct corw_handler *h, int fuse_fd) {
-    int res = 0;
 	PRINT_INFO("nblocks %d", h->nblocks);
+    int res = 0;
+    int loaded = 0;
+    int percent = 0;
+    int newpercent = 0;
+    int ncached = bitmap_popcount(h->bitmap, h->nblocks);
+    char progbuf[4];
+	PRINT_INFO("precached %d", ncached);
+
+    int fd_progress = open("./progess.json", O_WRONLY | O_APPEND | O_CREAT, 0644);
+
+    lseek(fd_progress, 0, 0);
+    ssize_t writed = write(fd_progress, "{\"progress\":0}", 14);
+	PRINT_INFO("writed %d", (int) writed);
+
     for (int i = 0; i < h->nblocks; i++) {
         if (bitmap_test(h->bitmap, i)) {
             res = load_block(h, fuse_fd, i);
+            loaded++;
+	        // PRINT_INFO("loaded %d", (int) loaded);
+            newpercent = (100 * loaded) / ncached;
+            if (newpercent > percent) {
+                percent = newpercent;
+                sprintf(progbuf, "%d", percent);
+                lseek(fd_progress, 12, 0);
+                writed = write(fd_progress, progbuf, 4);
+                sync();
+	            PRINT_INFO("writed %d buf %s", (int) writed, progbuf);
+            }
             if (res < 0) {
                 PRINT_ERROR("block %d fuse_fd %d", i, fuse_fd);
                 // et maintenant, qu'est ce qu'on fait ? (cf nemo)
             }
         }
     }
+
+    close(fd_progress);
 }
 
 ssize_t corw_handler_load_range(struct corw_handler *h, int fuse_fd, loff_t loff, int length) {
